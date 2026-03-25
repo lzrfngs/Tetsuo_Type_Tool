@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tetsuo Type Tool</title>
+  <!-- Google Fonts: all 11 curated families -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Cormorant:ital,wght@0,300..700;1,300..700&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Eczar:wght@400..800&family=Fira+Sans:ital,wght@0,100;0,300;0,400;0,700;0,900;1,400&family=IBM+Plex+Sans:ital,wght@0,100..700;1,100..700&family=Inknut+Antiqua:wght@300;400;700;900&family=Poppins:ital,wght@0,100;0,300;0,400;0,700;0,900;1,400&family=Rubik:ital,wght@0,300..900;1,300..900&family=Spectral:ital,wght@0,200;0,400;0,700;0,800;1,400&family=Syne:wght@400..800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+  <!-- ── Toolbar ── -->
+  <div id="toolbar">
+    <div class="toolbar-group">
+      <input type="text" id="text-input" placeholder="Type here…" value="TETSUO" spellcheck="false" autocomplete="off">
+    </div>
+    <div class="toolbar-group">
+      <select id="font-picker"></select>
+      <select id="weight-picker"></select>
+      <input type="number" id="size-picker" value="120" min="12" max="800" step="4">
+      <span class="size-unit">px</span>
+    </div>
+    <div class="toolbar-group toolbar-right">
+      <button id="btn-add">Add to canvas</button>
+    </div>
+  </div>
+
+  <!-- ── Canvas area ── -->
+  <div id="canvas-wrap">
+    <canvas id="canvas"></canvas>
+    <canvas id="gl" class="gl-overlay"></canvas>
+  </div>
+
+  <!-- ── Effects panel ── -->
+  <div id="effects-panel">
+    <div class="panel-header">
+      <span class="panel-title">Effects</span>
+      <button id="btn-reset-fx" class="panel-btn">Reset</button>
+    </div>
+
+    <div class="fx-group">
+      <label class="fx-label"><span>Stress</span><span class="fx-val" id="v-stress">0</span></label>
+      <input type="range" class="fx-slider" id="fx-stress" min="0" max="100" value="0">
+    </div>
+
+    <div class="fx-group">
+      <label class="fx-label"><span>Noise</span><span class="fx-val" id="v-noise">0</span></label>
+      <input type="range" class="fx-slider" id="fx-noise" min="0" max="100" value="0">
+    </div>
+
+    <div class="fx-group">
+      <label class="fx-label"><span>Blur</span><span class="fx-val" id="v-blur">0</span></label>
+      <input type="range" class="fx-slider" id="fx-blur" min="0" max="100" value="0">
+    </div>
+
+    <div class="fx-group">
+      <label class="fx-label"><span>Erode</span><span class="fx-val" id="v-erode">0</span></label>
+      <input type="range" class="fx-slider" id="fx-erode" min="0" max="100" value="0">
+    </div>
+
+    <div class="fx-group">
+      <label class="fx-label"><span>Warp</span><span class="fx-val" id="v-warp">0</span></label>
+      <input type="range" class="fx-slider" id="fx-warp" min="0" max="100" value="0">
+    </div>
+
+    <div class="fx-group">
+      <label class="fx-label"><span>Threshold</span><span class="fx-val" id="v-threshold">50</span></label>
+      <input type="range" class="fx-slider" id="fx-threshold" min="0" max="100" value="50">
+    </div>
+  </div>
+
+  <!-- ── Bottom bar ── -->
+  <div id="bottombar">
+    <span id="status">Ready</span>
+    <button id="btn-clear">Clear</button>
+    <button id="btn-export">Export PNG</button>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

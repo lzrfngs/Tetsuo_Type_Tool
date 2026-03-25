@@ -1,0 +1,320 @@
+/* ── Tetsuo Type Tool — Stylesheet ──────────────────────────────────────
+   Visual direction: light canvas, black text, monochrome UI.
+   Minimal, restrained. The type is the star.
+   UI font: IBM Plex Sans (already loaded via Google Fonts).
+   ──────────────────────────────────────────────────────────────────── */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #f5f5f5;
+  --canvas-bg: #ffffff;
+  --ui-bg: #fafafa;
+  --border: #e0e0e0;
+  --text: #111111;
+  --text-dim: #888888;
+  --text-muted: #bbbbbb;
+  --accent: #111111;
+  --hover: #000000;
+  --selection: rgba(0,0,0,0.06);
+  --font-ui: 'IBM Plex Sans', -apple-system, sans-serif;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Toolbar ─────────────────────────────────────────────────────────── */
+
+#toolbar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 20px;
+  background: var(--ui-bg);
+  border-bottom: 1px solid var(--border);
+  z-index: 100;
+  user-select: none;
+}
+
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.toolbar-right { margin-left: auto; }
+
+/* ── Inputs & selects ──────────────────────────────────────────────── */
+
+#text-input {
+  width: 200px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--canvas-bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  outline: none;
+  transition: border-color 0.12s;
+}
+
+#text-input:focus {
+  border-color: var(--accent);
+}
+
+#text-input::placeholder {
+  color: var(--text-muted);
+}
+
+select {
+  height: 30px;
+  padding: 0 24px 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--canvas-bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  letter-spacing: 0.01em;
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  transition: border-color 0.12s;
+}
+
+select:focus { border-color: var(--accent); }
+
+#font-picker { width: 180px; }
+#weight-picker { width: 100px; }
+
+#size-picker {
+  width: 60px;
+  height: 30px;
+  padding: 0 4px 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--canvas-bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  text-align: right;
+  outline: none;
+  -moz-appearance: textfield;
+}
+#size-picker::-webkit-inner-spin-button,
+#size-picker::-webkit-outer-spin-button { -webkit-appearance: none; }
+
+.size-unit {
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────── */
+
+button {
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--canvas-bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+button:hover {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--canvas-bg);
+}
+
+#btn-add {
+  background: var(--text);
+  color: var(--canvas-bg);
+  border-color: var(--text);
+}
+
+#btn-add:hover {
+  background: #333;
+  border-color: #333;
+}
+
+/* ── Canvas ──────────────────────────────────────────────────────────── */
+
+#canvas-wrap {
+  position: fixed;
+  top: 48px;
+  left: 0; right: 220px;
+  bottom: 36px;
+  background: var(--canvas-bg);
+  overflow: hidden;
+  cursor: default;
+}
+
+#canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.gl-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none; /* clicks pass through to 2D canvas underneath */
+  visibility: hidden; /* shown when effects are active */
+}
+
+/* ── Bottom bar ──────────────────────────────────────────────────────── */
+
+#bottombar {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 20px;
+  background: var(--ui-bg);
+  border-top: 1px solid var(--border);
+  z-index: 100;
+  user-select: none;
+}
+
+#status {
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+  margin-right: auto;
+}
+
+/* ── Selected word outline ───────────────────────────────────────────── */
+/* Drawn via canvas, but we keep visual constants here for reference:
+   selection stroke: 1px solid #111
+   resize handles: 5px squares, filled #111
+*/
+
+/* ── Effects panel ───────────────────────────────────────────────────── */
+
+#effects-panel {
+  position: fixed;
+  top: 48px; right: 0;
+  bottom: 36px;
+  width: 220px;
+  background: var(--ui-bg);
+  border-left: 1px solid var(--border);
+  padding: 0;
+  overflow-y: auto;
+  z-index: 100;
+  user-select: none;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-title {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.panel-btn {
+  height: 22px;
+  padding: 0 8px;
+  font-size: 9px;
+  border: 1px solid var(--border);
+}
+
+.fx-group {
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid rgba(0,0,0,0.04);
+}
+
+.fx-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text);
+  margin-bottom: 6px;
+  cursor: default;
+}
+
+.fx-val {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  min-width: 20px;
+  text-align: right;
+}
+
+.fx-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 3px;
+  background: var(--border);
+  outline: none;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.fx-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 10px;
+  height: 10px;
+  background: var(--text);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.fx-slider::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  background: var(--text);
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+}
+
+.fx-slider::-webkit-slider-thumb:hover {
+  background: #000;
+  transform: scale(1.2);
+}
+
+.fx-slider::-moz-range-thumb:hover {
+  background: #000;
+  transform: scale(1.2);
+}
