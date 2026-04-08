@@ -30,6 +30,7 @@ let nextId = 1;
 const scene = [];        // Array of WordObject
 let selected = null;     // currently selected WordObject (or null)
 let dragState = null;    // { mode: 'move'|'resize', offsetX, offsetY, corner }
+let darkCanvas = false;  // true = dark background, light text
 
 function createWord(text, fontFamily, fontWeight, fontSize, x, y) {
   return {
@@ -40,9 +41,13 @@ function createWord(text, fontFamily, fontWeight, fontSize, x, y) {
     fontSize,
     x,
     y,
-    width: 0,   // measured after first render
+    width: 0,
     height: 0,
     color: '#000000',
+    letterSpacing: 0,
+    rotation: 0,   // degrees
+    scaleX: 1,     // horizontal scale (negative = flip)
+    scaleY: 1,     // vertical scale (negative = flip)
   };
 }
 
@@ -51,6 +56,8 @@ function createWord(text, fontFamily, fontWeight, fontSize, x, y) {
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 const wrap = document.getElementById('canvas-wrap');
+const overlayCanvas = document.getElementById('overlay');
+const overlayCtx = overlayCanvas.getContext('2d');
 
 function resizeCanvas() {
   const dpr = window.devicePixelRatio || 1;
@@ -60,7 +67,13 @@ function resizeCanvas() {
   canvas.style.width = rect.width + 'px';
   canvas.style.height = rect.height + 'px';
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  overlayCanvas.width = rect.width * dpr;
+  overlayCanvas.height = rect.height * dpr;
+  overlayCanvas.style.width = rect.width + 'px';
+  overlayCanvas.style.height = rect.height + 'px';
+  overlayCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
   render();
+  if (hasActiveEffects() && glState) renderGL();
 }
 
 window.addEventListener('resize', resizeCanvas);
@@ -70,12 +83,13 @@ window.addEventListener('resize', resizeCanvas);
 
 function measureWord(word) {
   ctx.font = `${word.fontWeight} ${word.fontSize}px '${word.fontFamily}'`;
+  ctx.letterSpacing = `${word.letterSpacing || 0}px`;
   const metrics = ctx.measureText(word.text);
   word.width = metrics.width;
-  // Use actual glyph metrics for precise height — gives the real top and bottom of the letterforms
   word.ascent = metrics.actualBoundingBoxAscent;
   word.descent = metrics.actualBoundingBoxDescent;
   word.height = word.ascent + word.descent;
+  ctx.letterSpacing = '0px';
 }
 
 // ── Render loop ───────────────────────────────────────────────────────
@@ -83,41 +97,60 @@ function measureWord(word) {
 
 function render() {
   const rect = wrap.getBoundingClientRect();
-  // Fill with white background (clearRect leaves transparent, which reads as black in WebGL)
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = darkCanvas ? '#000000' : '#ffffff';
   ctx.fillRect(0, 0, rect.width, rect.height);
 
   // Draw each word
   for (const word of scene) {
+    ctx.save();
+    const cx = word.x + word.width / 2;
+    const cy = word.y + word.height / 2;
+    ctx.translate(cx, cy);
+    if (word.rotation) ctx.rotate(word.rotation * Math.PI / 180);
+    ctx.scale(word.scaleX || 1, word.scaleY || 1);
+    ctx.translate(-cx, -cy);
     ctx.font = `${word.fontWeight} ${word.fontSize}px '${word.fontFamily}'`;
+    ctx.letterSpacing = `${word.letterSpacing || 0}px`;
     ctx.fillStyle = word.color;
     ctx.textBaseline = 'alphabetic';
-    // word.x, word.y is the top-left of the bounding box.
-    // Draw text at (x, y + ascent) so the baseline sits correctly.
     ctx.fillText(word.text, word.x, word.y + (word.ascent || 0));
+    ctx.letterSpacing = '0px';
+    ctx.restore();
 
     // Re-measure (in case font just loaded)
     measureWord(word);
   }
 
-  // Draw selection box around selected word
+  // Selection UI is drawn on the overlay canvas (visible even when GL effects are active)
+  renderOverlay();
+}
+
+// ── Selection overlay ─────────────────────────────────────────────────
+// Draws selection handles on a separate canvas that sits above both
+// the 2D and GL canvases, so it's always visible during interaction.
+
+function renderOverlay() {
+  const rect = wrap.getBoundingClientRect();
+  overlayCtx.clearRect(0, 0, rect.width, rect.height);
+
   if (selected) {
     const s = selected;
     const pad = 6;
+    const uiColor = darkCanvas ? '#aaa' : '#111';
 
     // Dashed outline
-    ctx.strokeStyle = '#111';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 3]);
-    ctx.strokeRect(s.x - pad, s.y - pad, s.width + pad * 2, s.height + pad * 2);
-    ctx.setLineDash([]);
+    overlayCtx.strokeStyle = uiColor;
+    overlayCtx.lineWidth = 1;
+    overlayCtx.setLineDash([4, 3]);
+    overlayCtx.strokeRect(s.x - pad, s.y - pad, s.width + pad * 2, s.height + pad * 2);
+    overlayCtx.setLineDash([]);
 
     // Resize handles — small squares at corners
     const handleSize = 5;
     const corners = getCorners(s, pad);
-    ctx.fillStyle = '#111';
+    overlayCtx.fillStyle = uiColor;
     for (const c of corners) {
-      ctx.fillRect(c.x - handleSize / 2, c.y - handleSize / 2, handleSize, handleSize);
+      overlayCtx.fillRect(c.x - handleSize / 2, c.y - handleSize / 2, handleSize, handleSize);
     }
   }
 }
@@ -204,9 +237,29 @@ canvas.addEventListener('pointerdown', (e) => {
     }
   } else {
     selected = null;
+    if (editingWord) {
+      editingWord = false;
+      btnAdd.textContent = 'Add to canvas';
+    }
+  }
+
+  // Sync toolbar controls with the selected word
+  if (selected) {
+    fontPicker.value = selected.fontFamily;
+    updateWeightPicker();
+    weightPicker.value = selected.fontWeight;
+    sizePicker.value = selected.fontSize;
+    colorPicker.value = selected.color;
+    trackingPicker.value = selected.letterSpacing || 0;
+    // Exit editing mode when clicking a different word
+    if (editingWord) {
+      editingWord = false;
+      btnAdd.textContent = 'Add to canvas';
+    }
   }
 
   render();
+  if (hasActiveEffects() && glState) renderGL();
 });
 
 canvas.addEventListener('pointermove', (e) => {
@@ -216,9 +269,11 @@ canvas.addEventListener('pointermove', (e) => {
   const y = e.clientY - rect.top;
 
   if (dragState.mode === 'move' && selected) {
+    canvas.style.cursor = 'grabbing';
     selected.x = x - dragState.offsetX;
     selected.y = y - dragState.offsetY;
     render();
+    if (hasActiveEffects() && glState) renderGL();
   }
 
   if (dragState.mode === 'resize' && selected) {
@@ -230,13 +285,42 @@ canvas.addEventListener('pointermove', (e) => {
     const delta = (Math.abs(dx) > Math.abs(dy)) ? dx : dy;
     const newSize = Math.max(12, Math.round(dragState.origFontSize + delta));
     selected.fontSize = newSize;
+    sizePicker.value = newSize;
     measureWord(selected);
     render();
+    if (hasActiveEffects() && glState) renderGL();
   }
 });
 
 canvas.addEventListener('pointerup', () => {
+  if (dragState && dragState.mode === 'move') {
+    canvas.style.cursor = 'grab';
+  }
   dragState = null;
+});
+
+// ── Double-click to edit a word's text ────────────────────────────────
+canvas.addEventListener('dblclick', (e) => {
+  const rect = wrap.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  const hit = hitTest(x, y);
+  if (hit) {
+    selected = hit;
+    editingWord = true;
+    textInput.value = hit.text;
+    textInput.focus();
+    textInput.select();
+    btnAdd.textContent = 'Editing…';
+    fontPicker.value = hit.fontFamily;
+    updateWeightPicker();
+    weightPicker.value = hit.fontWeight;
+    sizePicker.value = hit.fontSize;
+    colorPicker.value = hit.color;
+    trackingPicker.value = hit.letterSpacing || 0;
+    render();
+    updateStatus(`Editing "${hit.text}"`);
+  }
 });
 
 // ── Keyboard shortcuts ────────────────────────────────────────────────
@@ -248,6 +332,7 @@ document.addEventListener('keydown', (e) => {
     if (idx !== -1) scene.splice(idx, 1);
     selected = null;
     render();
+    if (hasActiveEffects() && glState) renderGL();
     e.preventDefault();
   }
 
@@ -257,14 +342,118 @@ document.addEventListener('keydown', (e) => {
       const removed = scene.pop();
       if (selected === removed) selected = null;
       render();
+      if (hasActiveEffects() && glState) renderGL();
       updateStatus(`Removed "${removed.text}"`);
     }
     e.preventDefault();
   }
 
-  // Enter — add word to canvas (same as clicking the button)
+  // Enter — add word to canvas or finish editing
   if (e.key === 'Enter' && document.activeElement === textInput) {
-    addWordToCanvas();
+    if (editingWord) {
+      editingWord = false;
+      btnAdd.textContent = 'Add to canvas';
+      textInput.blur();
+      updateStatus(`Updated "${selected.text}"`);
+    } else {
+      addWordToCanvas();
+    }
+  }
+
+  // Escape — deselect and exit editing mode
+  if (e.key === 'Escape') {
+    if (editingWord) {
+      editingWord = false;
+      btnAdd.textContent = 'Add to canvas';
+      textInput.blur();
+    }
+    if (selected) {
+      selected = null;
+      render();
+      if (hasActiveEffects() && glState) renderGL();
+    }
+  }
+
+  // Arrow keys — nudge selected word (Shift = 10px, normal = 1px)
+  if (selected && document.activeElement !== textInput &&
+      ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+    const step = e.shiftKey ? 10 : 1;
+    if (e.key === 'ArrowUp')    selected.y -= step;
+    if (e.key === 'ArrowDown')  selected.y += step;
+    if (e.key === 'ArrowLeft')  selected.x -= step;
+    if (e.key === 'ArrowRight') selected.x += step;
+    render();
+    if (hasActiveEffects() && glState) renderGL();
+    e.preventDefault();
+  }
+
+  // Ctrl+D — duplicate selected word (offset by 20px)
+  if (e.key === 'd' && (e.ctrlKey || e.metaKey) && selected) {
+    const dupe = createWord(selected.text, selected.fontFamily, selected.fontWeight, selected.fontSize, selected.x + 20, selected.y + 20);
+    dupe.color = selected.color;
+    dupe.letterSpacing = selected.letterSpacing;
+    dupe.rotation = selected.rotation;
+    dupe.scaleX = selected.scaleX;
+    dupe.scaleY = selected.scaleY;
+    measureWord(dupe);
+    scene.push(dupe);
+    selected = dupe;
+    render();
+    if (hasActiveEffects() && glState) renderGL();
+    updateStatus(`Duplicated "${dupe.text}"`);
+    e.preventDefault();
+  }
+
+  // R / Shift+R — rotate selected word (15° increments, Shift = 1°)
+  if (e.key === 'r' && selected && document.activeElement !== textInput && !e.ctrlKey && !e.metaKey) {
+    const step = e.shiftKey ? 1 : 15;
+    selected.rotation = ((selected.rotation || 0) + step) % 360;
+    render();
+    if (hasActiveEffects() && glState) renderGL();
+    updateStatus(`Rotated ${selected.rotation}°`);
+    e.preventDefault();
+  }
+
+  // H — flip horizontally
+  if (e.key === 'h' && selected && document.activeElement !== textInput && !e.ctrlKey && !e.metaKey) {
+    selected.scaleX = (selected.scaleX || 1) * -1;
+    render();
+    if (hasActiveEffects() && glState) renderGL();
+    updateStatus(selected.scaleX < 0 ? 'Flipped horizontal' : 'Unflipped horizontal');
+    e.preventDefault();
+  }
+
+  // V — flip vertically
+  if (e.key === 'v' && selected && document.activeElement !== textInput && !e.ctrlKey && !e.metaKey) {
+    selected.scaleY = (selected.scaleY || 1) * -1;
+    render();
+    if (hasActiveEffects() && glState) renderGL();
+    updateStatus(selected.scaleY < 0 ? 'Flipped vertical' : 'Unflipped vertical');
+    e.preventDefault();
+  }
+
+  // [ / ] — change layer order of selected word
+  if (e.key === '[' && selected && document.activeElement !== textInput) {
+    const idx = scene.indexOf(selected);
+    if (idx > 0) {
+      scene.splice(idx, 1);
+      scene.splice(idx - 1, 0, selected);
+      render();
+      if (hasActiveEffects() && glState) renderGL();
+      updateStatus('Moved back');
+    }
+    e.preventDefault();
+  }
+  if (e.key === ']' && selected && document.activeElement !== textInput) {
+    const idx = scene.indexOf(selected);
+    if (idx < scene.length - 1) {
+      scene.splice(idx, 1);
+      scene.splice(idx + 1, 0, selected);
+      render();
+      if (hasActiveEffects() && glState) renderGL();
+      updateStatus('Moved forward');
+    }
+    e.preventDefault();
   }
 });
 
@@ -274,10 +463,34 @@ const textInput = document.getElementById('text-input');
 const fontPicker = document.getElementById('font-picker');
 const weightPicker = document.getElementById('weight-picker');
 const sizePicker = document.getElementById('size-picker');
+const colorPicker = document.getElementById('color-picker');
+const trackingPicker = document.getElementById('tracking-picker');
 const btnAdd = document.getElementById('btn-add');
 const btnClear = document.getElementById('btn-clear');
 const btnExport = document.getElementById('btn-export');
 const statusEl = document.getElementById('status');
+
+// ── Editing mode ──────────────────────────────────────────────────────
+// When true, typing in the text input updates the selected word live
+// instead of preparing text for a new word.
+let editingWord = false;
+
+textInput.addEventListener('input', () => {
+  if (editingWord && selected) {
+    selected.text = textInput.value || ' ';
+    measureWord(selected);
+    render();
+    if (hasActiveEffects() && glState) renderGL();
+  }
+});
+
+// Exit editing mode when text input loses focus
+textInput.addEventListener('blur', () => {
+  if (editingWord) {
+    editingWord = false;
+    btnAdd.textContent = 'Add to canvas';
+  }
+});
 
 // Populate font picker
 for (const f of FONTS) {
@@ -312,8 +525,57 @@ function weightLabel(w) {
   return labels[w] || String(w);
 }
 
-fontPicker.addEventListener('change', updateWeightPicker);
+fontPicker.addEventListener('change', () => {
+  updateWeightPicker();
+  // If a word is selected, update its font
+  if (selected) {
+    selected.fontFamily = fontPicker.value;
+    selected.fontWeight = parseInt(weightPicker.value, 10);
+    measureWord(selected);
+    render();
+    if (hasActiveEffects() && glState) renderGL();
+  }
+});
 updateWeightPicker();
+
+// Update selected word when weight changes
+weightPicker.addEventListener('change', () => {
+  if (selected) {
+    selected.fontWeight = parseInt(weightPicker.value, 10);
+    measureWord(selected);
+    render();
+    if (hasActiveEffects() && glState) renderGL();
+  }
+});
+
+// Update selected word when size changes
+sizePicker.addEventListener('change', () => {
+  if (selected) {
+    selected.fontSize = parseInt(sizePicker.value, 10) || 120;
+    measureWord(selected);
+    render();
+    if (hasActiveEffects() && glState) renderGL();
+  }
+});
+
+// Update selected word when color changes
+colorPicker.addEventListener('input', () => {
+  if (selected) {
+    selected.color = colorPicker.value;
+    render();
+    if (hasActiveEffects() && glState) renderGL();
+  }
+});
+
+// Update selected word when letter spacing changes
+trackingPicker.addEventListener('change', () => {
+  if (selected) {
+    selected.letterSpacing = parseInt(trackingPicker.value, 10) || 0;
+    measureWord(selected);
+    render();
+    if (hasActiveEffects() && glState) renderGL();
+  }
+});
 
 // Add word to canvas
 function addWordToCanvas() {
@@ -330,22 +592,53 @@ function addWordToCanvas() {
   const y = rect.height / 2 - fontSize / 2 + (Math.random() - 0.5) * 40;
 
   const word = createWord(text, fontFamily, fontWeight, fontSize, x, y);
+  word.color = colorPicker.value;
+  word.letterSpacing = parseInt(trackingPicker.value, 10) || 0;
   measureWord(word);
   scene.push(word);
   selected = word;
   render();
+  if (hasActiveEffects() && glState) renderGL();
 
   updateStatus(`Added "${text}" — ${fontFamily} ${weightLabel(fontWeight)}`);
 }
 
-btnAdd.addEventListener('click', addWordToCanvas);
+btnAdd.addEventListener('click', () => {
+  if (editingWord) {
+    // Finish editing
+    editingWord = false;
+    btnAdd.textContent = 'Add to canvas';
+    textInput.blur();
+    if (selected) updateStatus(`Updated "${selected.text}"`);
+  } else {
+    addWordToCanvas();
+  }
+});
 
 // Clear canvas
 btnClear.addEventListener('click', () => {
   scene.length = 0;
   selected = null;
+  if (editingWord) {
+    editingWord = false;
+    btnAdd.textContent = 'Add to canvas';
+  }
   render();
+  if (hasActiveEffects() && glState) renderGL();
   updateStatus('Canvas cleared');
+});
+
+// Invert canvas (dark mode toggle)
+const btnInvert = document.getElementById('btn-invert');
+btnInvert.addEventListener('click', () => {
+  darkCanvas = !darkCanvas;
+  wrap.style.background = darkCanvas ? '#000' : '#fff';
+  btnInvert.style.opacity = darkCanvas ? '1' : '0.5';
+  // Auto-invert new word color when switching modes
+  colorPicker.value = darkCanvas ? '#ffffff' : '#000000';
+  render();
+  if (hasActiveEffects() && glState) renderGL();
+  updateStatus(darkCanvas ? 'Dark canvas' : 'Light canvas');
 });
 
 // Export PNG
@@ -355,15 +648,23 @@ btnExport.addEventListener('click', () => {
   selected = null;
   render();
 
+  // Stop animation during export to get a clean frame
+  if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
+
   // If effects are active, export from the GL canvas; otherwise from the 2D canvas
   const exportCanvas = hasActiveEffects() && glState ? glCanvas : canvas;
   if (hasActiveEffects()) renderGL();  // ensure GL canvas is up to date
+
+  // Generate timestamped filename from content
+  const words = scene.map(w => w.text).join('-').toLowerCase().replace(/[^a-z0-9-]/g, '') || 'tetsuo';
+  const ts = new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-');
+  const filename = `${words}-${ts}.png`;
 
   exportCanvas.toBlob((blob) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'tetsuo-export.png';
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
     updateStatus('PNG exported');
@@ -371,6 +672,8 @@ btnExport.addEventListener('click', () => {
 
   selected = prevSelected;
   render();
+  // Restart animation if effects were running
+  if (hasActiveEffects() && glState) renderGL();
 });
 
 // Status bar
@@ -398,6 +701,25 @@ canvas.addEventListener('mousemove', (e) => {
   canvas.style.cursor = hit ? 'grab' : 'default';
 });
 
+// ── Scroll-to-resize ──────────────────────────────────────────────────
+// Mouse wheel over a selected word scales it smoothly
+canvas.addEventListener('wheel', (e) => {
+  if (!selected) return;
+  const rect = wrap.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  const hit = hitTest(x, y);
+  if (hit !== selected) return;
+
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? -2 : 2;
+  selected.fontSize = Math.max(12, selected.fontSize + delta);
+  sizePicker.value = selected.fontSize;
+  measureWord(selected);
+  render();
+  if (hasActiveEffects() && glState) renderGL();
+}, { passive: false });
+
 // ── WebGL effects pipeline ────────────────────────────────────────────
 // Six stackable effects in a single shader pass:
 //   1. Grain — film grain noise, concentrated in midtones
@@ -409,14 +731,36 @@ canvas.addEventListener('mousemove', (e) => {
 
 const glCanvas = document.getElementById('gl');
 
-// Effect uniforms
+// ── Palettes — Mantle Creep-inspired color ramps ──────────────────────
+const PALETTES = [
+  { name:'mono',     bg:[0,0,0],      dark:[30,30,30],     mid:[128,128,128],  light:[255,255,255] },
+  { name:'ivory',    bg:[10,8,5],      dark:[20,14,6],      mid:[185,135,55],   light:[228,210,172] },
+  { name:'amber',    bg:[8,5,2],       dark:[10,5,2],       mid:[210,95,15],    light:[235,195,140] },
+  { name:'ink',      bg:[238,232,220], dark:[8,6,4],        mid:[60,45,90],     light:[238,232,220] },
+  { name:'jade',     bg:[4,10,6],      dark:[3,8,5],        mid:[30,160,100],   light:[180,225,195] },
+  { name:'rust',     bg:[9,4,2],       dark:[8,3,1],        mid:[210,60,20],    light:[230,185,155] },
+  { name:'lavender', bg:[8,7,14],      dark:[55,15,90],     mid:[175,130,230],  light:[210,200,240] },
+  { name:'glacier',  bg:[5,8,12],      dark:[10,40,80],     mid:[115,175,200],  light:[195,215,228] },
+  { name:'solar',    bg:[12,8,2],      dark:[180,40,10],    mid:[240,180,20],   light:[255,240,200] },
+  { name:'neon',     bg:[2,2,8],       dark:[0,200,120],    mid:[0,255,200],    light:[180,255,240] },
+];
+let paletteIdx = 0;
+
+// Effect uniforms — expanded
 const fx = {
-  stress: 0,     // 0-1 — spread/expand dark areas (data canvas blur)
-  noise: 0,      // 0-1 — edge-modulated grain
-  blur: 0,       // 0-1 — smooth gaussian blur (data canvas blur)
-  erode: 0,      // 0-1 — shrink letterforms inward
-  warp: 0,       // 0-1 — FBM spatial distortion
-  threshold: 0.5,// 0-1 — ink/paper cutoff (0.5 = neutral)
+  stress: 0,
+  noise: 0,
+  blur: 0,
+  erode: 0,
+  warp: 0,
+  threshold: 0.5,
+  gradient: 0,     // 0-1 — palette color through type
+  solarize: 0,     // 0-1 — Sabattier tone inversion
+  chroma: 0,       // 0-1 — chromatic aberration
+  halftone: 0,     // 0-1 — dot screen
+  shimmer: 0,      // 0-1 — heat shimmer
+  emboss: 0,       // 0-1 — directional lighting emboss
+  glitch: 0,       // 0-1 — scan line displacement
 };
 
 function initGL() {
@@ -426,7 +770,6 @@ function initGL() {
     return null;
   }
 
-  // Vertex shader: fullscreen quad
   const vsSource = `
     attribute vec2 aPos;
     varying vec2 vUv;
@@ -435,31 +778,42 @@ function initGL() {
       gl_Position = vec4(aPos, 0.0, 1.0);
     }`;
 
-  // Fragment shader — clean rewrite based on Mantle Creep pipeline analysis.
+  // ═══════════════════════════════════════════════════════════════════
+  // FRAGMENT SHADER — 13 stackable effects + palette color mapping
   //
-  // KEY INSIGHT: In Mantle Creep, effects operate on DATA (raw float values)
-  // BEFORE color mapping. We do the same here:
-  //   1. Sample texture → extract luminance as "data" (0=black text, 1=white bg)
-  //   2. STRESS: Gaussian blur the luminance field (like Tidal Bleed on sim rows)
-  //   3. NOISE: Perturb luminance with grain BEFORE thresholding (like Shore Roughness)
-  //   4. BLUR: Additional soft blur on final luminance
-  //   5. Re-threshold with gamma curve → output as grayscale
-  //
-  // All effects work on ONE value (luminance) flowing through the pipeline.
-  // No separate competing systems. No RGB manipulation. No artifacts.
+  // Pipeline: warp → sample → erode → noise → threshold → solarize
+  //           → emboss → halftone → glitch → chroma → gradient color
+  // ═══════════════════════════════════════════════════════════════════
   const fsSource = `
     precision highp float;
     uniform sampler2D uTex;
     uniform vec2 uRes;
+    uniform float uTime;
+    uniform float uInvert;
+    // Texture effects
     uniform float uStress;
     uniform float uNoise;
     uniform float uBlur;
-    uniform float uErode;     // shrink letterforms inward
-    uniform float uWarp;      // FBM spatial distortion
-    uniform float uThreshold; // controls ink/paper cutoff point
+    uniform float uErode;
+    // Distortion
+    uniform float uWarp;
+    uniform float uHalftone;
+    uniform float uShimmer;
+    // Tone
+    uniform float uThreshold;
+    uniform float uEmboss;
+    uniform float uGlitch;
+    // Color
+    uniform float uGradient;
+    uniform float uSolarize;
+    uniform float uChroma;
+    // Palette colors (normalized 0-1)
+    uniform vec3 uPalDark;
+    uniform vec3 uPalMid;
+    uniform vec3 uPalLight;
     varying vec2 vUv;
 
-    // ── Noise functions ───────────────────────────────────────────
+    // ── Noise ─────────────────────────────────────────────────────
     float hash(vec2 p) {
       p = fract(p * vec2(127.1, 311.7));
       p += dot(p, p + 45.32);
@@ -467,16 +821,18 @@ function initGL() {
     }
     float vnoise(vec2 p) {
       vec2 i = floor(p), f = fract(p);
-      vec2 u = f * f * (3.0 - 2.0 * f);
+      vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
       return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x),
                  mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y);
     }
     float fbm(vec2 p) {
       float v = 0.0, a = 0.5;
-      v += vnoise(p) * a; p = p * 2.13 + vec2(1.7, 9.2); a *= 0.5;
-      v += vnoise(p) * a; p = p * 2.07 + vec2(8.3, 2.8); a *= 0.5;
-      v += vnoise(p) * a; p = p * 2.11 + vec2(3.1, 6.7); a *= 0.5;
-      v += vnoise(p) * a;
+      mat2 rot = mat2(0.8, 0.6, -0.6, 0.8);
+      for (int i = 0; i < 5; i++) {
+        v += vnoise(p) * a;
+        p = rot * p * 2.1 + vec2(1.7, 9.2);
+        a *= 0.5;
+      }
       return v;
     }
     float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
@@ -485,106 +841,199 @@ function initGL() {
       vec2 px = 1.0 / uRes;
       vec2 uv = vec2(vUv.x, 1.0 - vUv.y);
 
-      // ══════════════════════════════════════════════════════════════
-      // STEP 1: Extract luminance as "data"
-      // Black text = 0.0, white background = 1.0
-      // We INVERT so dark text = HIGH values (like Mantle Creep's activator)
-      // This means blur will SPREAD the high values = dark areas grow
-      // ══════════════════════════════════════════════════════════════
-
-      // Substrate displacement: FBM noise shifts WHERE we read from.
-      // This makes the edge contour itself wobbly and organic —
-      // like Mantle Creep's RO (Substrate Irregularity).
-      // Without this, noise only changes values ON the edge but the
-      // edge stays geometrically perfect — you can see the straight
-      // lines of the original letterforms through any amount of noise.
-      // ── WARP: FBM-driven spatial distortion ─────────────────────
-      // Displaces WHERE we read from the texture. Letters deform
-      // organically like they're printed on a liquid surface.
-      vec2 dataUv = uv;
-      if (uWarp > 0.001) {
-        float warpAmt = uWarp * 0.04;
-        float wx = (fbm(uv * 8.0 + vec2(7.3, 13.1)) - 0.5) * warpAmt;
-        float wy = (fbm(uv * 8.0 + vec2(41.7, 3.9)) - 0.5) * warpAmt;
-        dataUv = uv + vec2(wx, wy);
+      // ── SHIMMER: heat-haze refraction ───────────────────────────
+      // Animated sine waves at different scales — like air above asphalt
+      vec2 shimUv = uv;
+      if (uShimmer > 0.001) {
+        float t = uTime * 0.8;
+        float sx = sin(uv.y * 60.0 + t * 2.3) * sin(uv.y * 23.0 - t * 1.1);
+        float sy = sin(uv.x * 45.0 + t * 1.7) * sin(uv.x * 31.0 - t * 2.1);
+        shimUv += vec2(sx, sy) * uShimmer * 0.008;
       }
 
-      // ── NOISE substrate displacement ────────────────────────────
-      // Separate from Warp — this is finer, more granular.
-      // Makes edges wobbly at a micro scale.
+      // ── GLITCH: scan-line displacement ──────────────────────────
+      // Random horizontal bands shift sideways — digital signal corruption
+      vec2 glitchUv = shimUv;
+      if (uGlitch > 0.001) {
+        float band = floor(shimUv.y * uRes.y / (3.0 + uGlitch * 8.0));
+        float shift = (hash(vec2(band, floor(uTime * 4.0))) - 0.5);
+        float active = step(0.85 - uGlitch * 0.3, hash(vec2(band * 0.1, floor(uTime * 6.0))));
+        glitchUv.x += shift * uGlitch * 0.08 * active;
+      }
+
+      // ── WARP: animated FBM displacement ─────────────────────────
+      vec2 dataUv = glitchUv;
+      if (uWarp > 0.001) {
+        float warpAmt = uWarp * 0.06;
+        float t = uTime * 0.12;
+        float wx = (fbm(glitchUv * 6.0 + vec2(7.3 + t, 13.1 - t * 0.7)) - 0.5) * warpAmt;
+        float wy = (fbm(glitchUv * 6.0 + vec2(41.7 - t * 0.5, 3.9 + t * 0.8)) - 0.5) * warpAmt;
+        float wx2 = (fbm(glitchUv * 18.0 + vec2(3.1 - t * 0.3, 7.7 + t * 0.4)) - 0.5) * warpAmt * 0.3;
+        float wy2 = (fbm(glitchUv * 18.0 + vec2(23.3 + t * 0.2, 11.1 - t * 0.5)) - 0.5) * warpAmt * 0.3;
+        dataUv = glitchUv + vec2(wx + wx2, wy + wy2);
+      }
+
+      // ── NOISE: substrate displacement ───────────────────────────
       if (uNoise > 0.001) {
-        float displaceAmt = uNoise * 0.008;
-        float dx = (fbm(dataUv * 35.0 + vec2(7.3, 13.1)) - 0.5) * displaceAmt;
-        float dy = (fbm(dataUv * 35.0 + vec2(41.7, 3.9)) - 0.5) * displaceAmt;
-        dataUv = dataUv + vec2(dx, dy);
+        float displaceAmt = uNoise * 0.012;
+        float dx = (fbm(dataUv * 30.0 + vec2(7.3, 13.1 + uTime * 0.08)) - 0.5) * displaceAmt;
+        float dy = (fbm(dataUv * 30.0 + vec2(41.7, 3.9 - uTime * 0.06)) - 0.5) * displaceAmt;
+        dataUv += vec2(dx, dy);
       }
 
       float data = 1.0 - luma(texture2D(uTex, dataUv).rgb);
 
-      // ── ERODE: eat away from the OUTSIDE in ────────────────────
-      // Samples the data gradient to find edges, then erodes from there.
-      // The erosion is noise-modulated so it's uneven — acid on metal.
-      // Works on the blurred data, so it erodes the soft gradients,
-      // pushing the edge contour inward.
+      // ── ERODE ───────────────────────────────────────────────────
       if (uErode > 0.001) {
-        // Sample neighborhood to find how "exposed" this pixel is
-        // (how close to the edge). Pixels deep inside text are safe;
-        // pixels near the boundary get eaten first.
-        float L = 1.0 - luma(texture2D(uTex, dataUv + vec2(-px.x * 2.0, 0.0)).rgb);
-        float R = 1.0 - luma(texture2D(uTex, dataUv + vec2( px.x * 2.0, 0.0)).rgb);
-        float U = 1.0 - luma(texture2D(uTex, dataUv + vec2(0.0, -px.y * 2.0)).rgb);
-        float D = 1.0 - luma(texture2D(uTex, dataUv + vec2(0.0,  px.y * 2.0)).rgb);
-        // Minimum of neighbors — if ANY neighbor is background, we're exposed
-        float minNeighbor = min(min(L, R), min(U, D));
-        // Exposure: 0 = deep inside, 1 = right at the edge
-        float exposure = 1.0 - smoothstep(0.0, 0.5, minNeighbor);
-        // FBM noise makes erosion uneven — organic, not uniform
-        float erosionNoise = fbm(dataUv * 40.0 + vec2(19.3, 7.1));
-        float erosionAmt = uErode * (exposure * 0.7 + erosionNoise * 0.5);
-        data = max(0.0, data - erosionAmt);
+        float sd = 2.0 + uErode * 4.0;
+        float L  = 1.0 - luma(texture2D(uTex, dataUv + vec2(-px.x * sd, 0.0)).rgb);
+        float R  = 1.0 - luma(texture2D(uTex, dataUv + vec2( px.x * sd, 0.0)).rgb);
+        float U  = 1.0 - luma(texture2D(uTex, dataUv + vec2(0.0, -px.y * sd)).rgb);
+        float D  = 1.0 - luma(texture2D(uTex, dataUv + vec2(0.0,  px.y * sd)).rgb);
+        float TL = 1.0 - luma(texture2D(uTex, dataUv + vec2(-px.x, -px.y) * sd * 0.7).rgb);
+        float TR = 1.0 - luma(texture2D(uTex, dataUv + vec2( px.x, -px.y) * sd * 0.7).rgb);
+        float BL = 1.0 - luma(texture2D(uTex, dataUv + vec2(-px.x,  px.y) * sd * 0.7).rgb);
+        float BR = 1.0 - luma(texture2D(uTex, dataUv + vec2( px.x,  px.y) * sd * 0.7).rgb);
+        float mn = min(min(min(L, R), min(U, D)), min(min(TL, TR), min(BL, BR)));
+        float exposure = 1.0 - smoothstep(0.0, 0.35, mn);
+        float en = fbm(dataUv * 25.0 + vec2(19.3, 7.1)) * 0.5
+                 + vnoise(dataUv * 80.0 + vec2(3.1, 17.3)) * 0.3
+                 + hash(dataUv * uRes * 0.3 + vec2(11.1, 43.7)) * 0.2;
+        data = max(0.0, data - uErode * (exposure * 0.9 + en * 0.6));
       }
 
-      // ── NOISE: perturb data before thresholding ─────────────────
+      // ── NOISE: grain isolated to type area ──────────────────────
+      // KEY FIX: textPresence masks noise so background stays clean
       if (uNoise > 0.001) {
+        float textPresence = smoothstep(0.02, 0.12, data);
         float edgePeak = 4.0 * data * (1.0 - data);
-        float textPresence = smoothstep(0.02, 0.15, data);
-        float edgeMask = edgePeak * 0.75 + textPresence * 0.25 * data;
-        float n1 = hash(dataUv * uRes) - 0.5;
-        float n2 = hash(dataUv * uRes * 0.4137 + vec2(73.1, 41.9)) - 0.5;
-        float n3 = hash(dataUv * uRes * 1.731 + vec2(17.3, 89.1)) - 0.5;
-        float n4 = (fbm(dataUv * 55.0 + vec2(3.7, 11.3)) - 0.5);
-        float n5 = (fbm(dataUv * 22.0 + vec2(91.2, 7.8)) - 0.5) * 0.7;
-        float grain = n1 * 0.35 + n2 * 0.25 + n3 * 0.15 + n4 * 0.15 + n5 * 0.1;
-        data += grain * uNoise * 15.0 * edgeMask;
+        float midtoneMask = smoothstep(0.0, 0.3, data) * smoothstep(1.0, 0.6, data);
+        float fullMask = (edgePeak * 0.5 + midtoneMask * 0.3 + data * 0.2) * textPresence;
+
+        float n1 = hash(dataUv * uRes + uTime * 7.3) - 0.5;
+        float n2 = hash(dataUv * uRes * 0.414 + vec2(73.1, 41.9) + uTime * 3.1) - 0.5;
+        float n3 = hash(dataUv * uRes * 1.73 + vec2(17.3, 89.1) + uTime * 1.7) - 0.5;
+        float n4 = (fbm(dataUv * 45.0 + vec2(3.7 + uTime * 0.04, 11.3)) - 0.5);
+        float grain = n1 * 0.35 + n2 * 0.25 + n3 * 0.2 + n4 * 0.2;
+        data += grain * uNoise * 16.0 * fullMask;
       }
 
-      // ── THRESHOLD + GAMMA → output ──────────────────────────────
+      // ── THRESHOLD + GAMMA ───────────────────────────────────────
       data = clamp(data, 0.0, 1.0);
-
-      // Threshold as a levels crush (like Photoshop Levels).
-      // At 50 (neutral): no change.
-      // Below 50: pull black point up — light areas vanish, contrast increases.
-      //           Text thins out, fine details disappear.
-      // Above 50: pull white point down — dark areas expand, contrast increases.
-      //           Text thickens, everything commits to ink.
-      // This remaps the data range, not just shifts it.
-      float tNorm = uThreshold;  // 0-1, 0.5 = neutral
+      float tNorm = uThreshold;
       if (tNorm < 0.49) {
-        // Pull black point up: remap [blackPt, 1] → [0, 1]
-        float blackPt = (0.5 - tNorm) * 1.0;  // 0 at neutral, 0.5 at min
+        float blackPt = (0.5 - tNorm) * 1.0;
         data = smoothstep(blackPt, 1.0, data);
       } else if (tNorm > 0.51) {
-        // Pull white point down: remap [0, whitePt] → [0, 1]
-        float whitePt = 1.0 - (tNorm - 0.5) * 1.5;  // 1 at neutral, 0.25 at max
+        float whitePt = 1.0 - (tNorm - 0.5) * 1.5;
         data = smoothstep(0.0, max(0.05, whitePt), data);
       }
+      float gamma = mix(0.8, 0.45, uStress);
+      data = pow(clamp(data, 0.0, 1.0), gamma);
 
-      // Softer gamma — less aggressive edge snapping
-      float gamma = mix(0.8, 0.55, uStress);
-      float t = pow(data, gamma);
-      float brightness = 1.0 - t;
+      // ── EMBOSS: directional lighting on the surface ─────────────
+      // Samples the data field gradient to simulate raised letterforms
+      // lit from the upper-left — like debossed paper or stamped metal
+      if (uEmboss > 0.001) {
+        float eL = 1.0 - luma(texture2D(uTex, dataUv + vec2(-px.x * 2.0, 0.0)).rgb);
+        float eR = 1.0 - luma(texture2D(uTex, dataUv + vec2( px.x * 2.0, 0.0)).rgb);
+        float eU = 1.0 - luma(texture2D(uTex, dataUv + vec2(0.0, -px.y * 2.0)).rgb);
+        float eD = 1.0 - luma(texture2D(uTex, dataUv + vec2(0.0,  px.y * 2.0)).rgb);
+        // Gradient → surface normal approximation
+        float gx = eR - eL;
+        float gy = eD - eU;
+        // Light from upper-left
+        float light = (gx * 0.707 + gy * -0.707) * 0.5 + 0.5;
+        data = mix(data, data * light * 1.8, uEmboss * 0.8);
+        data = clamp(data, 0.0, 1.0);
+      }
 
-      gl_FragColor = vec4(vec3(brightness), 1.0);
+      // ── SOLARIZE: Sabattier effect ──────────────────────────────
+      // Partially inverts tones — darkroom technique where light hits
+      // the print during development. Creates eerie tone reversals.
+      if (uSolarize > 0.001) {
+        float curve = sin(data * 3.14159 * (1.0 + uSolarize * 2.0));
+        data = mix(data, abs(curve), uSolarize);
+        data = clamp(data, 0.0, 1.0);
+      }
+
+      // ── HALFTONE: dot screen pattern ────────────────────────────
+      // Classic CMYK-style dot grid. At low values: fine dots.
+      // At high values: large graphic dots that eat into each other.
+      float halftoneData = data;
+      if (uHalftone > 0.001) {
+        float dotSize = 3.0 + uHalftone * 15.0;
+        // Rotate grid 15° to avoid moiré with screen pixels
+        float angle = 0.2618;
+        float ca = cos(angle), sa = sin(angle);
+        vec2 rotUv = vec2(ca * uv.x - sa * uv.y, sa * uv.x + ca * uv.y);
+        vec2 cell = rotUv * uRes / dotSize;
+        vec2 cellCenter = (floor(cell) + 0.5) * dotSize / uRes;
+        // Undo rotation to sample original data at cell center
+        vec2 origCenter = vec2(ca * cellCenter.x + sa * cellCenter.y,
+                              -sa * cellCenter.x + ca * cellCenter.y);
+        float cellData = 1.0 - luma(texture2D(uTex, vec2(origCenter.x, 1.0 - origCenter.y)).rgb);
+        // Apply threshold + gamma to the cell data too
+        cellData = pow(clamp(cellData, 0.0, 1.0), gamma);
+
+        float dist = length(fract(cell) - 0.5);
+        float radius = sqrt(cellData) * 0.5;
+        float dot = 1.0 - smoothstep(radius - 0.04, radius + 0.04, dist);
+        halftoneData = mix(data, dot, uHalftone);
+      }
+      data = halftoneData;
+
+      // ── COLOR OUTPUT ────────────────────────────────────────────
+      // Start with monochrome, then blend in palette gradient
+      float brightness = 1.0 - data;
+      if (uInvert > 0.5) brightness = 1.0 - brightness;
+
+      vec3 col = vec3(brightness);
+
+      // ── GRADIENT: palette color through the type ────────────────
+      // Maps data luminance to a 3-stop palette ramp (dark→mid→light).
+      // Only applies to text areas, background stays clean.
+      if (uGradient > 0.001) {
+        float textMask = smoothstep(0.02, 0.08, data);
+        // 3-stop color ramp: dark (data=1) → mid (data=0.5) → light (data=0)
+        vec3 palColor;
+        if (data > 0.5) {
+          palColor = mix(uPalMid, uPalDark, (data - 0.5) * 2.0);
+        } else {
+          palColor = mix(uPalLight, uPalMid, data * 2.0);
+        }
+        // For inverted mode, swap the ramp direction
+        if (uInvert > 0.5) {
+          if (data > 0.5) {
+            palColor = mix(uPalMid, uPalLight, (data - 0.5) * 2.0);
+          } else {
+            palColor = mix(uPalDark, uPalMid, data * 2.0);
+          }
+        }
+        col = mix(col, palColor * textMask + col * (1.0 - textMask), uGradient);
+      }
+
+      // ── CHROMA: chromatic aberration ────────────────────────────
+      // Shifts RGB channels apart — like a cheap lens or risograph
+      // misregistration. Each channel reads from a slightly offset UV.
+      if (uChroma > 0.001) {
+        float chromaAmt = uChroma * 0.015;
+        // Offset from center — aberration increases toward edges
+        vec2 center = vec2(0.5);
+        vec2 dir = dataUv - center;
+        float rData = 1.0 - luma(texture2D(uTex, dataUv + dir * chromaAmt).rgb);
+        float bData = 1.0 - luma(texture2D(uTex, dataUv - dir * chromaAmt).rgb);
+        // Apply same gamma/threshold
+        rData = pow(clamp(rData, 0.0, 1.0), gamma);
+        bData = pow(clamp(bData, 0.0, 1.0), gamma);
+        float rBright = 1.0 - rData;
+        float bBright = 1.0 - bData;
+        if (uInvert > 0.5) { rBright = 1.0 - rBright; bBright = 1.0 - bBright; }
+        col.r = mix(col.r, rBright, uChroma);
+        col.b = mix(col.b, bBright, uChroma);
+      }
+
+      gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
     }`;
 
   function compileShader(type, source) {
@@ -636,12 +1085,24 @@ function initGL() {
   const uniforms = {
     uTex: gl.getUniformLocation(program, 'uTex'),
     uRes: gl.getUniformLocation(program, 'uRes'),
+    uTime: gl.getUniformLocation(program, 'uTime'),
+    uInvert: gl.getUniformLocation(program, 'uInvert'),
     uStress: gl.getUniformLocation(program, 'uStress'),
     uNoise: gl.getUniformLocation(program, 'uNoise'),
     uBlur: gl.getUniformLocation(program, 'uBlur'),
     uErode: gl.getUniformLocation(program, 'uErode'),
     uWarp: gl.getUniformLocation(program, 'uWarp'),
+    uHalftone: gl.getUniformLocation(program, 'uHalftone'),
+    uShimmer: gl.getUniformLocation(program, 'uShimmer'),
     uThreshold: gl.getUniformLocation(program, 'uThreshold'),
+    uEmboss: gl.getUniformLocation(program, 'uEmboss'),
+    uGlitch: gl.getUniformLocation(program, 'uGlitch'),
+    uGradient: gl.getUniformLocation(program, 'uGradient'),
+    uSolarize: gl.getUniformLocation(program, 'uSolarize'),
+    uChroma: gl.getUniformLocation(program, 'uChroma'),
+    uPalDark: gl.getUniformLocation(program, 'uPalDark'),
+    uPalMid: gl.getUniformLocation(program, 'uPalMid'),
+    uPalLight: gl.getUniformLocation(program, 'uPalLight'),
   };
 
   return { gl, program, tex, uniforms };
@@ -652,7 +1113,9 @@ const glState = initGL();
 // Check if any effect is active
 function hasActiveEffects() {
   return fx.stress > 0 || fx.noise > 0 || fx.blur > 0 ||
-         fx.erode > 0 || fx.warp > 0 || Math.abs(fx.threshold - 0.5) > 0.01;
+         fx.erode > 0 || fx.warp > 0 || Math.abs(fx.threshold - 0.5) > 0.01 ||
+         fx.gradient > 0 || fx.solarize > 0 || fx.chroma > 0 ||
+         fx.halftone > 0 || fx.shimmer > 0 || fx.emboss > 0 || fx.glitch > 0;
 }
 
 // Render the 2D canvas through the WebGL shader pipeline
@@ -690,17 +1153,28 @@ function createDataTexture() {
   // Apply CSS blur filter — scales with Stress and Blur sliders.
   // Canvas 2D blur is a proper gaussian with no pixel gaps.
   // This does the heavy lifting that the shader was doing poorly.
-  const stressBlur = fx.stress * 30;  // up to 30px blur for Stress
-  const softBlur = fx.blur * 20;      // up to 20px blur for Blur
+  const stressBlur = fx.stress * 40;  // up to 40px blur for Stress
+  const softBlur = fx.blur * 25;      // up to 25px blur for Blur
   const totalBlur = 3 + stressBlur + softBlur;  // 3px base for smooth data
   dataCtx.filter = `blur(${totalBlur}px)`;
 
-  // Draw text — same as the main render but without selection UI
+  // Draw text — always black on white for the shader's luminance pipeline.
+  // The shader handles inversion for dark mode at the output stage.
   for (const word of scene) {
+    dataCtx.save();
+    const cx = word.x + word.width / 2;
+    const cy = word.y + word.height / 2;
+    dataCtx.translate(cx, cy);
+    if (word.rotation) dataCtx.rotate(word.rotation * Math.PI / 180);
+    dataCtx.scale(word.scaleX || 1, word.scaleY || 1);
+    dataCtx.translate(-cx, -cy);
     dataCtx.font = `${word.fontWeight} ${word.fontSize}px '${word.fontFamily}'`;
-    dataCtx.fillStyle = word.color;
+    dataCtx.letterSpacing = `${word.letterSpacing || 0}px`;
+    dataCtx.fillStyle = '#000000';
     dataCtx.textBaseline = 'alphabetic';
     dataCtx.fillText(word.text, word.x, word.y + (word.ascent || 0));
+    dataCtx.letterSpacing = '0px';
+    dataCtx.restore();
   }
 
   dataCtx.restore();
@@ -709,15 +1183,16 @@ function createDataTexture() {
 }
 
 function renderGL() {
+  if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
+
   if (!glState || !hasActiveEffects()) {
     glCanvas.style.visibility = 'hidden';
-    canvas.style.visibility = 'visible';
-    if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
+    canvas.style.opacity = '1';
     return;
   }
 
   glCanvas.style.visibility = 'visible';
-  canvas.style.visibility = 'hidden';
+  canvas.style.opacity = '0';
 
   const { gl, tex, uniforms } = glState;
 
@@ -741,27 +1216,56 @@ function renderGL() {
 
   gl.uniform1i(uniforms.uTex, 0);
   gl.uniform2f(uniforms.uRes, w, h);
+  gl.uniform1f(uniforms.uTime, performance.now() / 1000);
+  gl.uniform1f(uniforms.uInvert, darkCanvas ? 1.0 : 0.0);
   gl.uniform1f(uniforms.uStress, fx.stress);
   gl.uniform1f(uniforms.uNoise, fx.noise);
   gl.uniform1f(uniforms.uBlur, fx.blur);
   gl.uniform1f(uniforms.uErode, fx.erode);
   gl.uniform1f(uniforms.uWarp, fx.warp);
+  gl.uniform1f(uniforms.uHalftone, fx.halftone);
+  gl.uniform1f(uniforms.uShimmer, fx.shimmer);
   gl.uniform1f(uniforms.uThreshold, fx.threshold);
+  gl.uniform1f(uniforms.uEmboss, fx.emboss);
+  gl.uniform1f(uniforms.uGlitch, fx.glitch);
+  gl.uniform1f(uniforms.uGradient, fx.gradient);
+  gl.uniform1f(uniforms.uSolarize, fx.solarize);
+  gl.uniform1f(uniforms.uChroma, fx.chroma);
+  // Pass palette colors as normalized vec3
+  const pal = PALETTES[paletteIdx];
+  gl.uniform3f(uniforms.uPalDark, pal.dark[0]/255, pal.dark[1]/255, pal.dark[2]/255);
+  gl.uniform3f(uniforms.uPalMid, pal.mid[0]/255, pal.mid[1]/255, pal.mid[2]/255);
+  gl.uniform3f(uniforms.uPalLight, pal.light[0]/255, pal.light[1]/255, pal.light[2]/255);
 
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-  animFrame = null;
+  // Continuous animation when time-dependent effects are active
+  if (fx.warp > 0 || fx.noise > 0 || fx.shimmer > 0 || fx.glitch > 0) {
+    animFrame = requestAnimationFrame(() => {
+      renderGL();
+      renderOverlay();
+    });
+  } else {
+    animFrame = null;
+  }
 }
 
 // ── Effects panel wiring ──────────────────────────────────────────────
 
 const sliderMap = [
+  { id: 'fx-gradient',  valId: 'v-gradient',  key: 'gradient' },
+  { id: 'fx-solarize',  valId: 'v-solarize',  key: 'solarize' },
+  { id: 'fx-chroma',    valId: 'v-chroma',    key: 'chroma' },
   { id: 'fx-stress',    valId: 'v-stress',    key: 'stress' },
   { id: 'fx-noise',     valId: 'v-noise',     key: 'noise' },
   { id: 'fx-blur',      valId: 'v-blur',      key: 'blur' },
   { id: 'fx-erode',     valId: 'v-erode',     key: 'erode' },
   { id: 'fx-warp',      valId: 'v-warp',      key: 'warp' },
+  { id: 'fx-halftone',  valId: 'v-halftone',  key: 'halftone' },
+  { id: 'fx-shimmer',   valId: 'v-shimmer',   key: 'shimmer' },
   { id: 'fx-threshold', valId: 'v-threshold', key: 'threshold' },
+  { id: 'fx-emboss',    valId: 'v-emboss',    key: 'emboss' },
+  { id: 'fx-glitch',    valId: 'v-glitch',    key: 'glitch' },
 ];
 
 for (const s of sliderMap) {
@@ -780,21 +1284,47 @@ for (const s of sliderMap) {
 document.getElementById('btn-reset-fx').addEventListener('click', () => {
   for (const s of sliderMap) {
     const slider = document.getElementById(s.id);
-    slider.value = 0;
-    document.getElementById(s.valId).textContent = '0';
-    fx[s.key] = 0;
+    // Threshold resets to 50 (neutral); all others to 0
+    const resetVal = s.key === 'threshold' ? 50 : 0;
+    slider.value = resetVal;
+    document.getElementById(s.valId).textContent = String(resetVal);
+    fx[s.key] = resetVal / 100;
   }
   render();
   renderGL();
   updateStatus('Effects reset');
 });
 
+// ── Palette UI ────────────────────────────────────────────────────────
+const palRow = document.getElementById('palette-row');
+PALETTES.forEach((p, i) => {
+  const sw = document.createElement('button');
+  sw.className = 'palette-swatch' + (i === paletteIdx ? ' active' : '');
+  // Use a gradient swatch showing dark→mid→light
+  const c = `linear-gradient(135deg, rgb(${p.dark}), rgb(${p.mid}), rgb(${p.light}))`;
+  sw.style.background = c;
+  sw.title = p.name;
+  sw.addEventListener('click', () => {
+    palRow.querySelectorAll('.palette-swatch').forEach(s => s.classList.remove('active'));
+    sw.classList.add('active');
+    paletteIdx = i;
+    if (hasActiveEffects() && glState) renderGL();
+    updateStatus(`Palette: ${p.name}`);
+  });
+  palRow.appendChild(sw);
+});
+
 // ── Init ──────────────────────────────────────────────────────────────
 
 resizeCanvas();
 
-// Place "TETSUO" in Archivo Black at 300px, dead center on load
-{
+// Wait for fonts to load before placing hero text — prevents fallback font
+// from appearing briefly and then jumping when the real font arrives.
+document.fonts.ready.then(() => {
+  // Set font picker to match the hero text
+  fontPicker.value = 'Archivo Black';
+  updateWeightPicker();
+
   const rect = wrap.getBoundingClientRect();
   const hero = createWord('TETSUO', 'Archivo Black', 400, 300, 0, 0);
   measureWord(hero);
@@ -802,6 +1332,12 @@ resizeCanvas();
   hero.y = (rect.height - hero.height) / 2;
   scene.push(hero);
   render();
-}
+  updateStatus('Ready — dbl-click edit · arrows nudge · R rotate · H/V flip · Ctrl+D dupe');
+});
 
-updateStatus('Ready — type a word and press Add to canvas');
+// Re-render when any font finishes loading (catches late-loading weights)
+document.fonts.addEventListener('loadingdone', () => {
+  for (const word of scene) measureWord(word);
+  render();
+  if (hasActiveEffects() && glState) renderGL();
+});

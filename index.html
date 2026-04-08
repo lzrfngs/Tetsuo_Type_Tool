@@ -21,6 +21,9 @@
       <select id="weight-picker"></select>
       <input type="number" id="size-picker" value="120" min="12" max="800" step="4">
       <span class="size-unit">px</span>
+      <input type="color" id="color-picker" value="#000000" title="Text color">
+      <input type="number" id="tracking-picker" value="0" min="-20" max="50" step="1" title="Letter spacing">
+      <span class="size-unit">ls</span>
     </div>
     <div class="toolbar-group toolbar-right">
       <button id="btn-add">Add to canvas</button>
@@ -31,49 +34,90 @@
   <div id="canvas-wrap">
     <canvas id="canvas"></canvas>
     <canvas id="gl" class="gl-overlay"></canvas>
+    <canvas id="overlay" class="overlay-canvas"></canvas>
   </div>
 
   <!-- ── Effects panel ── -->
   <div id="effects-panel">
+    <!-- ── Color section ── -->
     <div class="panel-header">
-      <span class="panel-title">Effects</span>
+      <span class="panel-title">Color</span>
+    </div>
+    <div id="palette-row" class="palette-row"></div>
+    <div class="fx-group">
+      <label class="fx-label"><span>Gradient</span><span class="fx-val" id="v-gradient">0</span></label>
+      <input type="range" class="fx-slider" id="fx-gradient" min="0" max="100" value="0" title="Push palette color through the type">
+    </div>
+    <div class="fx-group">
+      <label class="fx-label"><span>Solarize</span><span class="fx-val" id="v-solarize">0</span></label>
+      <input type="range" class="fx-slider" id="fx-solarize" min="0" max="100" value="0" title="Sabattier effect — partial tone inversion">
+    </div>
+    <div class="fx-group">
+      <label class="fx-label"><span>Chroma</span><span class="fx-val" id="v-chroma">0</span></label>
+      <input type="range" class="fx-slider" id="fx-chroma" min="0" max="100" value="0" title="RGB channel separation — cheap lens aberration">
+    </div>
+
+    <!-- ── Texture section ── -->
+    <div class="panel-header">
+      <span class="panel-title">Texture</span>
       <button id="btn-reset-fx" class="panel-btn">Reset</button>
     </div>
-
     <div class="fx-group">
       <label class="fx-label"><span>Stress</span><span class="fx-val" id="v-stress">0</span></label>
-      <input type="range" class="fx-slider" id="fx-stress" min="0" max="100" value="0">
+      <input type="range" class="fx-slider" id="fx-stress" min="0" max="100" value="0" title="Spread and thicken dark areas — ink under pressure">
     </div>
-
     <div class="fx-group">
       <label class="fx-label"><span>Noise</span><span class="fx-val" id="v-noise">0</span></label>
-      <input type="range" class="fx-slider" id="fx-noise" min="0" max="100" value="0">
+      <input type="range" class="fx-slider" id="fx-noise" min="0" max="100" value="0" title="Film grain isolated to type — silver halide clusters">
     </div>
-
     <div class="fx-group">
       <label class="fx-label"><span>Blur</span><span class="fx-val" id="v-blur">0</span></label>
-      <input type="range" class="fx-slider" id="fx-blur" min="0" max="100" value="0">
+      <input type="range" class="fx-slider" id="fx-blur" min="0" max="100" value="0" title="Soft gaussian blur — ink bleeding into paper">
     </div>
-
     <div class="fx-group">
       <label class="fx-label"><span>Erode</span><span class="fx-val" id="v-erode">0</span></label>
-      <input type="range" class="fx-slider" id="fx-erode" min="0" max="100" value="0">
+      <input type="range" class="fx-slider" id="fx-erode" min="0" max="100" value="0" title="Dissolve edges inward — acid-etched metal">
     </div>
 
+    <!-- ── Distortion section ── -->
+    <div class="panel-header">
+      <span class="panel-title">Distortion</span>
+    </div>
     <div class="fx-group">
       <label class="fx-label"><span>Warp</span><span class="fx-val" id="v-warp">0</span></label>
-      <input type="range" class="fx-slider" id="fx-warp" min="0" max="100" value="0">
+      <input type="range" class="fx-slider" id="fx-warp" min="0" max="100" value="0" title="Viscous spatial distortion — printed on liquid">
+    </div>
+    <div class="fx-group">
+      <label class="fx-label"><span>Halftone</span><span class="fx-val" id="v-halftone">0</span></label>
+      <input type="range" class="fx-slider" id="fx-halftone" min="0" max="100" value="0" title="CMYK dot screen — classic print reproduction">
+    </div>
+    <div class="fx-group">
+      <label class="fx-label"><span>Shimmer</span><span class="fx-val" id="v-shimmer">0</span></label>
+      <input type="range" class="fx-slider" id="fx-shimmer" min="0" max="100" value="0" title="Heat shimmer — light bending above hot pavement">
     </div>
 
+    <!-- ── Tone section ── -->
+    <div class="panel-header">
+      <span class="panel-title">Tone</span>
+    </div>
     <div class="fx-group">
       <label class="fx-label"><span>Threshold</span><span class="fx-val" id="v-threshold">50</span></label>
-      <input type="range" class="fx-slider" id="fx-threshold" min="0" max="100" value="50">
+      <input type="range" class="fx-slider" id="fx-threshold" min="0" max="100" value="50" title="Ink/paper cutoff — below 50 thins, above 50 thickens">
+    </div>
+    <div class="fx-group">
+      <label class="fx-label"><span>Emboss</span><span class="fx-val" id="v-emboss">0</span></label>
+      <input type="range" class="fx-slider" id="fx-emboss" min="0" max="100" value="0" title="Directional lighting on letterform surface">
+    </div>
+    <div class="fx-group">
+      <label class="fx-label"><span>Glitch</span><span class="fx-val" id="v-glitch">0</span></label>
+      <input type="range" class="fx-slider" id="fx-glitch" min="0" max="100" value="0" title="Scan line displacement — digital signal corruption">
     </div>
   </div>
 
   <!-- ── Bottom bar ── -->
   <div id="bottombar">
     <span id="status">Ready</span>
+    <button id="btn-invert" title="Toggle dark canvas">◑</button>
     <button id="btn-clear">Clear</button>
     <button id="btn-export">Export PNG</button>
   </div>
