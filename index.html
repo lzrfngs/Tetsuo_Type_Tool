@@ -11,11 +11,13 @@
   <link rel="stylesheet" href="/src/style.css">
 </head>
 <body>
+  <!-- ── Splash screen ── -->
+  <div id="splash">
+    <img src="/img/tetsuo-the-iron-man.webp" alt="" draggable="false">
+  </div>
+
   <!-- ── Toolbar ── -->
   <div id="toolbar">
-    <div class="toolbar-group">
-      <input type="text" id="text-input" placeholder="Type here…" value="TETSUO" spellcheck="false" autocomplete="off">
-    </div>
     <div class="toolbar-group">
       <select id="font-picker"></select>
       <select id="weight-picker"></select>
@@ -26,7 +28,11 @@
       <span class="size-unit">ls</span>
     </div>
     <div class="toolbar-group toolbar-right">
-      <button id="btn-add">Add to canvas</button>
+      <select id="preset-picker" title="Effect presets">
+        <option value="">Presets…</option>
+      </select>
+      <button id="btn-liquify" title="Liquify brush — drag to push type (L)" class="tool-btn">✦</button>
+      <button id="btn-particles" title="Chaos mode (⬡)">⬡</button>
     </div>
   </div>
 
@@ -34,7 +40,9 @@
   <div id="canvas-wrap">
     <canvas id="canvas"></canvas>
     <canvas id="gl" class="gl-overlay"></canvas>
+    <canvas id="three-overlay" class="gl-overlay"></canvas>
     <canvas id="overlay" class="overlay-canvas"></canvas>
+    <input type="text" id="live-type-input" spellcheck="false" autocomplete="off" aria-label="Live type input">
   </div>
 
   <!-- ── Effects panel ── -->
@@ -70,6 +78,20 @@
       <label class="fx-label"><span>Noise</span><span class="fx-val" id="v-noise">0</span></label>
       <input type="range" class="fx-slider" id="fx-noise" min="0" max="100" value="0" title="Film grain isolated to type — silver halide clusters">
     </div>
+    <div class="fx-sub-controls" id="noise-sub-controls">
+      <div class="fx-group fx-sub">
+        <label class="fx-label"><span>Speed</span><span class="fx-val" id="v-noise-speed">30</span></label>
+        <input type="range" class="fx-slider" id="fx-noise-speed" min="0" max="100" value="30" title="Grain animation speed — 0 = frozen, 100 = frenetic">
+      </div>
+      <div class="fx-group fx-sub">
+        <label class="fx-label"><span>Scale</span><span class="fx-val" id="v-noise-scale">50</span></label>
+        <input type="range" class="fx-slider" id="fx-noise-scale" min="0" max="100" value="50" title="Grain size — low = fine dust, high = coarse gravel">
+      </div>
+      <div class="fx-group fx-sub">
+        <label class="fx-label"><span>Organic</span><span class="fx-val" id="v-noise-organic">40</span></label>
+        <input type="range" class="fx-slider" id="fx-noise-organic" min="0" max="100" value="40" title="FBM complexity — low = digital hash, high = flowing, organic pattern">
+      </div>
+    </div>
     <div class="fx-group">
       <label class="fx-label"><span>Blur</span><span class="fx-val" id="v-blur">0</span></label>
       <input type="range" class="fx-slider" id="fx-blur" min="0" max="100" value="0" title="Soft gaussian blur — ink bleeding into paper">
@@ -95,6 +117,10 @@
       <label class="fx-label"><span>Shimmer</span><span class="fx-val" id="v-shimmer">0</span></label>
       <input type="range" class="fx-slider" id="fx-shimmer" min="0" max="100" value="0" title="Heat shimmer — light bending above hot pavement">
     </div>
+    <div class="fx-group">
+      <label class="fx-label"><span>Pixel Sort</span><span class="fx-val" id="v-pixelsort">0</span></label>
+      <input type="range" class="fx-slider" id="fx-pixelsort" min="0" max="100" value="0" title="Pixel sorting — glitch art classic, streaks of reorganized data">
+    </div>
 
     <!-- ── Tone section ── -->
     <div class="panel-header">
@@ -111,6 +137,18 @@
     <div class="fx-group">
       <label class="fx-label"><span>Glitch</span><span class="fx-val" id="v-glitch">0</span></label>
       <input type="range" class="fx-slider" id="fx-glitch" min="0" max="100" value="0" title="Scan line displacement — digital signal corruption">
+    </div>
+    <div class="fx-group">
+      <label class="fx-label"><span>Bloom</span><span class="fx-val" id="v-bloom">0</span></label>
+      <input type="range" class="fx-slider" id="fx-bloom" min="0" max="100" value="0" title="Luminous glow bleeding from edges — overexposed film">
+    </div>
+    <div class="fx-group">
+      <label class="fx-label"><span>Scanlines</span><span class="fx-val" id="v-scanlines">0</span></label>
+      <input type="range" class="fx-slider" id="fx-scanlines" min="0" max="100" value="0" title="CRT scan lines — cathode ray tube monitor">
+    </div>
+    <div class="fx-group">
+      <label class="fx-label"><span>Vignette</span><span class="fx-val" id="v-vignette">0</span></label>
+      <input type="range" class="fx-slider" id="fx-vignette" min="0" max="100" value="0" title="Darkened edges — camera lens falloff">
     </div>
   </div>
 

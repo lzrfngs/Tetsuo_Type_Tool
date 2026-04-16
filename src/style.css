@@ -6,6 +6,35 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* ── Splash screen ───────────────────────────────────────────────────── */
+
+#splash {
+  position: fixed;
+  top: 50%;
+  left: calc(50% - 120px);
+  transform: translate(-50%, -50%);
+  z-index: 9999;
+  background: #000;
+  padding: 12px;
+  border: 1px solid #333;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05);
+  opacity: 1;
+  transition: opacity 0.5s ease-out, transform 0.5s ease-out;
+}
+
+#splash.out {
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.97);
+  pointer-events: none;
+}
+
+#splash img {
+  display: block;
+  width: 360px;
+  height: auto;
+  user-select: none;
+}
+
 :root {
   --bg: #f5f5f5;
   --canvas-bg: #ffffff;
@@ -260,6 +289,7 @@ button:hover {
   border-left: 1px solid var(--border);
   padding: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   z-index: 100;
   user-select: none;
 }
@@ -268,9 +298,9 @@ button:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px 6px;
+  padding: 8px 14px 4px;
   border-bottom: 1px solid var(--border);
-  margin-top: 2px;
+  margin-top: 0;
 }
 
 .panel-header:first-child {
@@ -294,21 +324,24 @@ button:hover {
 
 .palette-row {
   display: flex;
-  gap: 4px;
-  padding: 10px 14px 6px;
+  justify-content: center;
+  gap: 5px;
+  padding: 8px 14px 6px;
   border-bottom: 1px solid rgba(0,0,0,0.04);
 }
 
 .palette-swatch {
-  width: 22px;
-  height: 22px;
-  border-radius: 2px;
-  border: 2px solid transparent;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid transparent;
   cursor: pointer;
   transition: border-color 0.12s, transform 0.1s;
   outline: none;
+  padding: 0;
+  flex-shrink: 0;
 }
-.palette-swatch:hover { transform: scale(1.15); }
+.palette-swatch:hover { transform: scale(1.8); }
 .palette-swatch.active { border-color: var(--text); }
 
 #tracking-picker {
@@ -329,7 +362,7 @@ button:hover {
 #tracking-picker::-webkit-outer-spin-button { -webkit-appearance: none; }
 
 .fx-group {
-  padding: 8px 14px 6px;
+  padding: 5px 14px 4px;
   border-bottom: 1px solid rgba(0,0,0,0.04);
 }
 
@@ -340,7 +373,7 @@ button:hover {
   font-size: 11px;
   font-weight: 400;
   color: var(--text);
-  margin-bottom: 4px;
+  margin-bottom: 2px;
   cursor: default;
 }
 
@@ -393,4 +426,91 @@ button:hover {
 .fx-slider::-moz-range-thumb:hover {
   background: #000;
   transform: scale(1.2);
+}
+
+/* ── Noise sub-controls ──────────────────────────────────────────────── */
+
+.fx-sub-controls {
+  background: rgba(0, 0, 0, 0.02);
+  border-left: 2px solid var(--border);
+  margin-left: 8px;
+}
+
+.fx-sub {
+  padding-left: 12px;
+}
+
+.fx-sub .fx-label span:first-child {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+/* ── Liquify button ──────────────────────────────────────────────────── */
+
+.tool-btn {
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 10px;
+  transition: background 0.12s, color 0.12s;
+}
+
+.tool-btn.active {
+  background: var(--text);
+  color: var(--canvas-bg);
+  border-color: var(--text);
+}
+
+/* Liquify brush cursor: 40px circle with crosshair center */
+#canvas-wrap.liquify-active #canvas {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Ccircle cx='20' cy='20' r='18' fill='none' stroke='%23000' stroke-width='1' opacity='0.6'/%3E%3Ccircle cx='20' cy='20' r='18' fill='none' stroke='%23fff' stroke-width='1' opacity='0.3' stroke-dasharray='3 3'/%3E%3Cline x1='20' y1='16' x2='20' y2='24' stroke='%23000' stroke-width='1' opacity='0.7'/%3E%3Cline x1='16' y1='20' x2='24' y2='20' stroke='%23000' stroke-width='1' opacity='0.7'/%3E%3C/svg%3E") 20 20, crosshair;
+}
+
+/* ── Preset picker ───────────────────────────────────────────────────── */
+
+#preset-picker {
+  width: 110px;
+  font-size: 10px;
+}
+
+/* ── Live type hidden input ──────────────────────────────────────────── */
+
+#live-type-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  z-index: -1;
+  caret-color: transparent;
+}
+
+/* ── Particle button ─────────────────────────────────────────────────── */
+
+#btn-particles {
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 10px;
+  transition: background 0.15s, color 0.15s, transform 0.15s;
+}
+
+#btn-particles:hover {
+  transform: scale(1.1);
+}
+
+#btn-particles:active {
+  transform: scale(0.95);
+}
+
+/* ── Three.js overlay ────────────────────────────────────────────────── */
+
+#three-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  visibility: hidden;
+  z-index: 5;
 }
